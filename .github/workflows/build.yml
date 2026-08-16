@@ -28,7 +28,7 @@ jobs:
     steps:
 
 
-    - name: Checkout FFmpeg build repo
+    - name: Checkout
       uses: actions/checkout@v4
 
 
@@ -56,8 +56,9 @@ jobs:
 
 
 
-    - name: Setup PATH
+    - name: Setup environment
       shell: bash
+
       run: |
 
         echo "/mingw64/bin" >> $GITHUB_PATH
@@ -71,6 +72,7 @@ jobs:
     #############################################
 
     - name: Build libfdk-aac
+
       shell: msys2 {0}
 
       run: |
@@ -103,8 +105,8 @@ jobs:
         make -j$(nproc)
 
 
-
         make install
+
 
 
 
@@ -114,6 +116,7 @@ jobs:
     #############################################
 
     - name: Build lame
+
       shell: msys2 {0}
 
       run: |
@@ -135,7 +138,8 @@ jobs:
         ./configure \
           --prefix=/mingw64 \
           --enable-static \
-          --disable-shared
+          --disable-shared \
+          --disable-frontend
 
 
 
@@ -148,11 +152,13 @@ jobs:
 
 
 
+
     #############################################
     # libopus
     #############################################
 
     - name: Build opus
+
       shell: msys2 {0}
 
       run: |
@@ -178,7 +184,8 @@ jobs:
         ./configure \
           --prefix=/mingw64 \
           --enable-static \
-          --disable-shared
+          --disable-shared \
+          --disable-extra-programs
 
 
 
@@ -187,6 +194,7 @@ jobs:
 
 
         make install
+
 
 
 
@@ -216,6 +224,7 @@ jobs:
 
 
         git checkout $FF_VERSION
+
 
 
 
@@ -263,7 +272,11 @@ jobs:
 
           --disable-doc \
 
-          --disable-programs=ffplay,ffprobe \
+          --disable-avdevice \
+
+          --disable-ffplay \
+
+          --disable-ffprobe \
 
           --enable-ffmpeg \
 
@@ -272,6 +285,7 @@ jobs:
           --enable-libmp3lame \
 
           --enable-libopus
+
 
 
 
@@ -291,6 +305,7 @@ jobs:
 
 
 
+
     - name: Install FFmpeg
 
       shell: msys2 {0}
@@ -306,11 +321,12 @@ jobs:
 
 
 
+
     #############################################
     # Verify
     #############################################
 
-    - name: Verify FDK AAC
+    - name: Verify build
 
       shell: msys2 {0}
 
@@ -320,7 +336,18 @@ jobs:
         /mingw64/bin/ffmpeg -version
 
 
+        echo "==== AAC encoder ===="
+
+
         /mingw64/bin/ffmpeg -encoders | grep fdk
+
+
+        echo "==== MP3 encoder ===="
+
+
+        /mingw64/bin/ffmpeg -encoders | grep mp3
+
+
 
 
 
@@ -328,7 +355,7 @@ jobs:
     # Package
     #############################################
 
-    - name: Package ffmpeg.exe
+    - name: Package
 
       shell: bash
 
@@ -338,13 +365,10 @@ jobs:
         mkdir release
 
 
-
         cp /mingw64/bin/ffmpeg.exe release/
 
 
-
         strip release/ffmpeg.exe
-
 
 
         ls -lh release/ffmpeg.exe
@@ -353,7 +377,7 @@ jobs:
 
 
 
-    - name: Upload Artifact
+    - name: Upload artifact
 
       uses: actions/upload-artifact@v4
 
@@ -368,11 +392,12 @@ jobs:
 
 
 
+
     #############################################
-    # GitHub Release
+    # Release
     #############################################
 
-    - name: Create Release
+    - name: GitHub Release
 
       if: startsWith(github.ref, 'refs/tags/')
 
