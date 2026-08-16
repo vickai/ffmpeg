@@ -12,8 +12,7 @@ on:
 
 env:
 
-  FF_VERSION: release/9.0
-
+  FF_VERSION: n9.0
 
 
 jobs:
@@ -194,6 +193,7 @@ jobs:
 
         git clone \
           --depth=1 \
+          --branch n9.0 \
           https://github.com/FFmpeg/FFmpeg.git ffmpeg
 
 
