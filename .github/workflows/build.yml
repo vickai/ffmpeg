@@ -1,0 +1,57 @@
+name: Build FFmpeg with FDK-AAC (Windows)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install Tools
+      run: |
+        choco install -y nasm
+        choco install -y cmake --installargs 'ADD_CMAKE_TO_PATH=System'
+        choco install -y ninja
+        choco install -y git
+
+    - name: Clone FDK-AAC
+      run: |
+        git clone https://github.com/mstorsjo/fdk-aac.git C:\fdk-aac
+
+    - name: Build FDK-AAC
+      run: |
+        cmake -B C:\fdk-aac\build -G "Ninja" -DCMAKE_BUILD_TYPE=Release
+        cmake --build C:\fdk-aac\build
+        cmake --install C:\fdk-aac\build --prefix C:\ffmpeg-install
+
+    - name: Clone FFmpeg
+      run: |
+        git clone https://github.com/FFmpeg/FFmpeg.git C:\ffmpeg
+
+    - name: Configure FFmpeg
+      run: |
+        cd C:\ffmpeg
+        ./configure ^
+          --toolchain=msvc ^
+          --enable-libfdk-aac ^
+          --enable-nonfree ^
+          --enable-gpl ^
+          --extra-cflags="-IC:\ffmpeg-install\include" ^
+          --extra-ldflags="-LC:\ffmpeg-install\lib"
+
+    - name: Build FFmpeg
+      run: |
+        cd C:\ffmpeg
+        nmake
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ffmpeg-fdk-aac-windows
+        path: C:\ffmpeg\ffmpeg.exe
