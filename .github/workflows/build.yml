@@ -28,6 +28,7 @@ jobs:
             mingw-w64-x86_64-x265
             mingw-w64-x86_64-libvpx
             mingw-w64-x86_64-opus
+            zip unzip
 
       - name: Build static fdk-aac
         shell: msys2 {0}
@@ -64,11 +65,12 @@ jobs:
             --disable-shared \
             --pkg-config-flags="--static" \
             --extra-libs="-lpthread -lm" \
+            --extra-ldflags="-static-libgcc -static-libstdc++" \
             --disable-debug
           make -j$(nproc)
           make install
 
-      - name: Collect binaries
+      - name: Collect binaries & Zip
         shell: msys2 {0}
         run: |
           mkdir -p output
