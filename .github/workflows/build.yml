@@ -1,62 +1,59 @@
-name: Build FFmpeg with FDK-AAC (Windows)
+name: Build FFmpeg with libfdk_aac
 
 on:
-  workflow_dispatch:
+  push:
+    branches: [ main ]
+  workflow_dispatch: # 支持手动点击运行
 
 jobs:
-  build:
-    runs-on: windows-latest
-
+  build-linux:
+    runs-on: ubuntu-latest
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Install Tools
-      run: |
-        choco install -y nasm
-        choco install -y cmake --installargs 'ADD_CMAKE_TO_PATH=System'
-        choco install -y ninja
-        choco install -y git
+      - name: Install build dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential git cmake yasm nasm pkg-config
 
-    - name: Clone FDK-AAC
-      run: |
-        git clone https://github.com/mstorsjo/fdk-aac.git "${{ github.workspace }}\fdk-aac"
+      - name: Build libfdk_aac
+        run: |
+          git clone https://github.com/mstorsjo/fdk-aac.git
+          cd fdk-aac
+          mkdir build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local ..
+          make -j$(nproc)
+          sudo make install
+          sudo ldconfig
 
-    - name: Build FDK-AAC
-      shell: pwsh
-      run: |
-        cmake -S "${{ github.workspace }}\fdk-aac" `
-              -B "${{ github.workspace }}\fdk-aac\build" `
-              -G "Ninja" `
-              -DCMAKE_BUILD_TYPE=Release
+      - name: Build FFmpeg
+        run: |
+          git clone https://github.com/FFmpeg/FFmpeg.git
+          cd FFmpeg
+          ./configure \
+            --prefix=/usr/local \
+            --enable-gpl \
+            --enable-libfdk-aac \
+            --enable-libx264 \
+            --enable-libx265 \
+            --enable-libvpx \
+            --enable-libopus \
+            --enable-libmp3lame \
+            --enable-nonfree \
+            --enable-shared \
+            --enable-static
+          make -j$(nproc)
+          sudo make install
 
-        cmake --build "${{ github.workspace }}\fdk-aac\build"
-        cmake --install "${{ github.workspace }}\fdk-aac\build" --prefix "${{ github.workspace }}\install"
+      - name: Pack binaries
+        run: |
+          mkdir -p ffmpeg_bin
+          cp /usr/local/bin/ffmpeg /usr/local/bin/ffprobe ffmpeg_bin/
+          tar -zcvf ffmpeg-linux-x86_64.tar.gz ffmpeg_bin
 
-    - name: Clone FFmpeg
-      run: |
-        git clone https://github.com/FFmpeg/FFmpeg.git "${{ github.workspace }}\FFmpeg"
-
-    - name: Configure FFmpeg
-      shell: cmd
-      run: |
-        cd "${{ github.workspace }}\FFmpeg"
-        configure ^
-          --toolchain=msvc ^
-          --enable-libfdk-aac ^
-          --enable-nonfree ^
-          --enable-gpl ^
-          --extra-cflags="-I${{ github.workspace }}\install\include" ^
-          --extra-ldflags="-L${{ github.workspace }}\install\lib"
-
-    - name: Build FFmpeg
-      shell: cmd
-      run: |
-        cd "${{ github.workspace }}\FFmpeg"
-        nmake
-
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: ffmpeg-fdk-aac-windows
-        path: "${{ github.workspace }}\FFmpeg\ffmpeg.exe"
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-linux-build
+          path: ffmpeg-linux-x86_64.tar.gz
