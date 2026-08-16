@@ -1,4 +1,4 @@
-name: Build Static FFmpeg Windows (libfdk_aac, Single EXE)
+name: Build Static FFmpeg Windows (libfdk_aac Single EXE)
 on:
   workflow_dispatch:
   push:
@@ -9,13 +9,13 @@ jobs:
     runs-on: windows-latest
     env:
       PREFIX: ${{ github.workspace }}/build_out
-      W64DEVKIT: ${{ github.workspace }}/w64devkit/bin
+      W64DIR: ${{ github.workspace }}/w64devkit
     steps:
-      - name: Fetch w64devkit (standalone MinGW toolchain)
+      - name: Download w64devkit v2.9.1 (latest)
         run: |
-          Invoke-WebRequest -Uri "https://github.com/skeeto/w64devkit/releases/download/v1.23.0/w64devkit-x64-1.23.0.zip" -OutFile w64devkit.zip
-          Expand-Archive w64devkit.zip -DestinationPath w64devkit
-          echo "${{ env.W64DEVKIT }}" | Out-File -FilePath $env:GITHUB_PATH -Append
+          Invoke-WebRequest -Uri "https://github.com/skeeto/w64devkit/releases/download/v2.9.1/w64devkit-x64.exe" -OutFile w64devkit.exe
+          .\w64devkit.exe -o$env:W64DIR -y
+          echo "$env:W64DIR\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
 
       - name: Build static fdk-aac
         shell: cmd
@@ -32,7 +32,7 @@ jobs:
           make -j%NUMBER_OF_PROCESSORS%
           make install
 
-      - name: Build FFmpeg (fully static)
+      - name: Build FFmpeg fully static
         shell: cmd
         run: |
           git clone --depth=1 https://github.com/FFmpeg/FFmpeg.git
@@ -61,16 +61,16 @@ jobs:
           make -j%NUMBER_OF_PROCESSORS%
           make install
 
-      - name: Package single EXEs
+      - name: Package artifacts
         shell: cmd
         run: |
           mkdir artifact
           copy %PREFIX%\bin\ffmpeg.exe artifact\
           copy %PREFIX%\bin\ffprobe.exe artifact\
           cd artifact
-          zip ffmpeg-win64-static.zip ffmpeg.exe ffprobe.exe
+          powershell Compress-Archive -Path *.exe -DestinationPath ffmpeg-win64-static.zip
 
-      - name: Upload build artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ffmpeg-win64-static
