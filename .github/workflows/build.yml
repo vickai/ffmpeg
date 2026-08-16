@@ -56,7 +56,8 @@ jobs:
 
 
 
-    - name: Setup environment
+    - name: Setup PATH
+
       shell: bash
 
       run: |
@@ -77,22 +78,17 @@ jobs:
 
       run: |
 
-
         cd /tmp
-
 
         git clone \
           --depth=1 \
           https://github.com/mstorsjo/fdk-aac.git
 
 
-
         cd fdk-aac
 
 
-
         autoreconf -fiv
-
 
 
         ./configure \
@@ -101,12 +97,9 @@ jobs:
           --disable-shared
 
 
-
         make -j$(nproc)
 
-
         make install
-
 
 
 
@@ -115,12 +108,11 @@ jobs:
     # libmp3lame
     #############################################
 
-    - name: Build lame
+    - name: Build libmp3lame
 
       shell: msys2 {0}
 
       run: |
-
 
         cd /tmp
 
@@ -130,9 +122,7 @@ jobs:
           https://github.com/lameproject/lame.git
 
 
-
         cd lame
-
 
 
         ./configure \
@@ -142,13 +132,9 @@ jobs:
           --disable-frontend
 
 
-
         make -j$(nproc)
 
-
-
         make install
-
 
 
 
@@ -157,12 +143,11 @@ jobs:
     # libopus
     #############################################
 
-    - name: Build opus
+    - name: Build libopus
 
       shell: msys2 {0}
 
       run: |
-
 
         cd /tmp
 
@@ -172,13 +157,10 @@ jobs:
           https://github.com/xiph/opus.git
 
 
-
         cd opus
 
 
-
         autoreconf -fiv
-
 
 
         ./configure \
@@ -188,13 +170,9 @@ jobs:
           --disable-extra-programs
 
 
-
         make -j$(nproc)
 
-
-
         make install
-
 
 
 
@@ -209,7 +187,6 @@ jobs:
 
       run: |
 
-
         cd /tmp
 
 
@@ -218,13 +195,10 @@ jobs:
           https://git.ffmpeg.org/ffmpeg.git
 
 
-
         cd ffmpeg
 
 
-
         git checkout $FF_VERSION
-
 
 
 
@@ -235,57 +209,31 @@ jobs:
 
       run: |
 
-
         cd /tmp/ffmpeg
 
 
-
         ./configure \
-
           --prefix=/mingw64 \
-
           --pkg-config-flags="--static" \
-
           --extra-cflags="-static" \
-
           --extra-ldflags="-static" \
-
           --extra-libs="-lpthread -lws2_32 -lwinmm" \
-
           --arch=x86_64 \
-
           --target-os=mingw32 \
-
           --enable-cross-compile \
-
           --cc=x86_64-w64-mingw32-gcc \
-
           --enable-nonfree \
-
           --enable-version3 \
-
           --enable-static \
-
           --disable-shared \
-
           --disable-debug \
-
           --disable-doc \
-
-          --disable-avdevice \
-
           --disable-ffplay \
-
-          --disable-ffprobe \
-
           --enable-ffmpeg \
-
+          --enable-ffprobe \
           --enable-libfdk_aac \
-
           --enable-libmp3lame \
-
           --enable-libopus
-
 
 
 
@@ -296,12 +244,10 @@ jobs:
 
       run: |
 
-
         cd /tmp/ffmpeg
 
 
         make -j$(nproc)
-
 
 
 
@@ -312,7 +258,6 @@ jobs:
 
       run: |
 
-
         cd /tmp/ffmpeg
 
 
@@ -321,32 +266,29 @@ jobs:
 
 
 
-
     #############################################
     # Verify
     #############################################
 
-    - name: Verify build
+    - name: Verify
 
       shell: msys2 {0}
 
       run: |
 
+        echo "===== FFmpeg ====="
 
         /mingw64/bin/ffmpeg -version
 
 
-        echo "==== AAC encoder ===="
-
+        echo "===== FDK AAC ====="
 
         /mingw64/bin/ffmpeg -encoders | grep fdk
 
 
-        echo "==== MP3 encoder ===="
-
+        echo "===== MP3 ====="
 
         /mingw64/bin/ffmpeg -encoders | grep mp3
-
 
 
 
@@ -361,23 +303,25 @@ jobs:
 
       run: |
 
-
         mkdir release
 
 
         cp /mingw64/bin/ffmpeg.exe release/
 
+        cp /mingw64/bin/ffprobe.exe release/
+
 
         strip release/ffmpeg.exe
 
-
-        ls -lh release/ffmpeg.exe
-
+        strip release/ffprobe.exe
 
 
+        ls -lh release
 
 
-    - name: Upload artifact
+
+
+    - name: Upload Artifact
 
       uses: actions/upload-artifact@v4
 
@@ -387,8 +331,7 @@ jobs:
         name: ffmpeg-windows-fdk-aac-audiobook
 
 
-        path: release/ffmpeg.exe
-
+        path: release/
 
 
 
@@ -405,5 +348,4 @@ jobs:
 
       with:
 
-
-        files: release/ffmpeg.exe
+        files: release/*
