@@ -2,8 +2,6 @@ name: Build FFmpeg with FDK-AAC (Windows)
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ "main" ]
 
 jobs:
   build:
@@ -22,36 +20,36 @@ jobs:
 
     - name: Clone FDK-AAC
       run: |
-        git clone https://github.com/mstorsjo/fdk-aac.git C:\fdk-aac
+        git clone https://github.com/mstorsjo/fdk-aac.git "${{ github.workspace }}\\fdk-aac"
 
     - name: Build FDK-AAC
       run: |
-        cmake -B C:\fdk-aac\build -G "Ninja" -DCMAKE_BUILD_TYPE=Release
-        cmake --build C:\fdk-aac\build
-        cmake --install C:\fdk-aac\build --prefix C:\ffmpeg-install
+        cmake -B "${{ github.workspace }}\\fdk-aac\\build" -G "Ninja" -DCMAKE_BUILD_TYPE=Release
+        cmake --build "${{ github.workspace }}\\fdk-aac\\build"
+        cmake --install "${{ github.workspace }}\\fdk-aac\\build" --prefix "${{ github.workspace }}\\install"
 
     - name: Clone FFmpeg
       run: |
-        git clone https://github.com/FFmpeg/FFmpeg.git C:\ffmpeg
+        git clone https://github.com/FFmpeg/FFmpeg.git "${{ github.workspace }}\\FFmpeg"
 
     - name: Configure FFmpeg
       run: |
-        cd C:\ffmpeg
+        cd "${{ github.workspace }}\\FFmpeg"
         ./configure ^
           --toolchain=msvc ^
           --enable-libfdk-aac ^
           --enable-nonfree ^
           --enable-gpl ^
-          --extra-cflags="-IC:\ffmpeg-install\include" ^
-          --extra-ldflags="-LC:\ffmpeg-install\lib"
+          --extra-cflags="-I${{ github.workspace }}\\install\\include" ^
+          --extra-ldflags="-L${{ github.workspace }}\\install\\lib"
 
     - name: Build FFmpeg
       run: |
-        cd C:\ffmpeg
+        cd "${{ github.workspace }}\\FFmpeg"
         nmake
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
         name: ffmpeg-fdk-aac-windows
-        path: C:\ffmpeg\ffmpeg.exe
+        path: "${{ github.workspace }}\\FFmpeg\\ffmpeg.exe"
