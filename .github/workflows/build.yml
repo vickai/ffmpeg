@@ -1,59 +1,78 @@
-name: Build FFmpeg with libfdk_aac
+name: Build FFmpeg Windows (libfdk_aac)
 
 on:
+  workflow_dispatch: # 手动触发
   push:
     branches: [ main ]
-  workflow_dispatch: # 支持手动点击运行
 
 jobs:
-  build-linux:
-    runs-on: ubuntu-latest
+  build-windows-mingw64:
+    runs-on: windows-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: mingw64
+          update: true
+          install: >-
+            base-devel
+            git
+            yasm
+            nasm
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-pkg-config
+            mingw-w64-x86_64-make
 
-      - name: Install build dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y build-essential git cmake yasm nasm pkg-config
-
-      - name: Build libfdk_aac
+      - name: Build fdk-aac
+        shell: msys2 {0}
         run: |
           git clone https://github.com/mstorsjo/fdk-aac.git
           cd fdk-aac
           mkdir build && cd build
-          cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local ..
+          cmake -G "MSYS Makefiles" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/mingw64 \
+            -DBUILD_SHARED_LIBS=OFF \
+            ..
           make -j$(nproc)
-          sudo make install
-          sudo ldconfig
+          make install
 
       - name: Build FFmpeg
+        shell: msys2 {0}
         run: |
           git clone https://github.com/FFmpeg/FFmpeg.git
           cd FFmpeg
           ./configure \
-            --prefix=/usr/local \
+            --prefix=/mingw64 \
+            --target-os=mingw64 \
+            --arch=x86_64 \
             --enable-gpl \
+            --enable-nonfree \
             --enable-libfdk-aac \
+            --enable-libmp3lame \
+            --enable-libopus \
             --enable-libx264 \
             --enable-libx265 \
             --enable-libvpx \
-            --enable-libopus \
-            --enable-libmp3lame \
-            --enable-nonfree \
-            --enable-shared \
-            --enable-static
+            --enable-static \
+            --disable-shared \
+            --pkg-config-flags="--static" \
+            --extra-libs="-lpthread -lm"
           make -j$(nproc)
-          sudo make install
+          make install
 
-      - name: Pack binaries
+      - name: Collect binaries
+        shell: msys2 {0}
         run: |
-          mkdir -p ffmpeg_bin
-          cp /usr/local/bin/ffmpeg /usr/local/bin/ffprobe ffmpeg_bin/
-          tar -zcvf ffmpeg-linux-x86_64.tar.gz ffmpeg_bin
+          mkdir -p output
+          cp /mingw64/bin/ffmpeg.exe output/
+          cp /mingw64/bin/ffprobe.exe output/
+          cd output
+          zip -r ffmpeg-windows-x86_64.zip ffmpeg.exe ffprobe.exe
 
-      - name: Upload artifact
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-linux-build
-          path: ffmpeg-linux-x86_64.tar.gz
+          name: ffmpeg-windows-x86_64
+          path: output/ffmpeg-windows-x86_64.zip
