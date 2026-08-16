@@ -24,7 +24,7 @@ jobs:
 
     - name: Build FDK-AAC
       run: |
-        cmake -B "${{ github.workspace }}\\fdk-aac\\build" -G "Ninja" -DCMAKE_BUILD_TYPE=Release
+        cmake -S "${{ github.workspace }}\\fdk-aac" -B "${{ github.workspace }}\\fdk-aac\\build" -G "Ninja" -DCMAKE_BUILD_TYPE=Release
         cmake --build "${{ github.workspace }}\\fdk-aac\\build"
         cmake --install "${{ github.workspace }}\\fdk-aac\\build" --prefix "${{ github.workspace }}\\install"
 
