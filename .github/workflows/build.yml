@@ -1,34 +1,48 @@
-name: Build FFmpeg Windows Full FDK-AAC
+name: Build FFmpeg Windows FDK AAC Audiobook Edition
+
 
 on:
+
   workflow_dispatch:
 
-  push:
-    tags:
-      - "v*"
+push:
+
+    branches: [ main ]
+
 
 
 env:
+
   FF_VERSION: master
+
 
 
 jobs:
 
+
   build:
+
 
     runs-on: windows-2022
 
+
     steps:
 
-    - name: Checkout
+
+    - name: Checkout FFmpeg build repo
       uses: actions/checkout@v4
+
 
 
     - name: Install MSYS2
       uses: msys2/setup-msys2@v2
+
       with:
+
         msystem: MINGW64
+
         update: true
+
         install: >-
           git
           make
@@ -40,132 +54,141 @@ jobs:
           libtool
           gcc
           mingw-w64-x86_64-toolchain
-          mingw-w64-x86_64-cmake
 
 
-    - name: Prepare environment
-      shell: msys2 {0}
+
+    - name: Setup PATH
+      shell: bash
       run: |
 
-        echo "PATH=/mingw64/bin:$PATH" >> $GITHUB_ENV
+        echo "/mingw64/bin" >> $GITHUB_PATH
 
         git config --global core.autocrlf false
 
 
 
     #############################################
-    # Build external libraries
+    # libfdk-aac
     #############################################
 
-    - name: Build fdk-aac
+    - name: Build libfdk-aac
       shell: msys2 {0}
+
       run: |
+
 
         cd /tmp
 
-        git clone --depth=1 https://github.com/mstorsjo/fdk-aac.git
+
+        git clone \
+          --depth=1 \
+          https://github.com/mstorsjo/fdk-aac.git
+
+
 
         cd fdk-aac
 
+
+
         autoreconf -fiv
+
+
 
         ./configure \
           --prefix=/mingw64 \
           --enable-static \
           --disable-shared
 
+
+
         make -j$(nproc)
+
+
 
         make install
 
 
 
-    - name: Build x264
+
+    #############################################
+    # libmp3lame
+    #############################################
+
+    - name: Build lame
       shell: msys2 {0}
+
       run: |
+
 
         cd /tmp
 
-        git clone --depth=1 https://code.videolan.org/videolan/x264.git
 
-        cd x264
+        git clone \
+          --depth=1 \
+          https://github.com/lameproject/lame.git
+
+
+
+        cd lame
+
+
 
         ./configure \
           --prefix=/mingw64 \
-          --host=x86_64-w64-mingw32 \
           --enable-static \
-          --disable-opencl
+          --disable-shared
+
+
 
         make -j$(nproc)
+
+
 
         make install
 
 
 
-    - name: Build x265
-      shell: msys2 {0}
-      run: |
 
-        cd /tmp
-
-        git clone --depth=1 https://bitbucket.org/multicoreware/x265_git.git
-
-        cd x265_git/source
-
-        cmake \
-          -G "MSYS Makefiles" \
-          -DCMAKE_INSTALL_PREFIX=/mingw64 \
-          -DENABLE_SHARED=OFF \
-          .
-
-        make -j$(nproc)
-
-        make install
-
-
+    #############################################
+    # libopus
+    #############################################
 
     - name: Build opus
       shell: msys2 {0}
+
       run: |
+
 
         cd /tmp
 
-        git clone --depth=1 https://github.com/xiph/opus.git
+
+        git clone \
+          --depth=1 \
+          https://github.com/xiph/opus.git
+
+
 
         cd opus
 
+
+
         autoreconf -fiv
+
+
 
         ./configure \
           --prefix=/mingw64 \
           --enable-static \
           --disable-shared
 
-        make -j$(nproc)
 
-        make install
-
-
-
-    - name: Build libvpx
-      shell: msys2 {0}
-      run: |
-
-        cd /tmp
-
-        git clone --depth=1 https://chromium.googlesource.com/webm/libvpx.git
-
-        cd libvpx
-
-        ./configure \
-          --prefix=/mingw64 \
-          --target=x86_64-win64-gcc \
-          --disable-shared \
-          --enable-static
 
         make -j$(nproc)
 
+
+
         make install
+
 
 
 
@@ -174,26 +197,39 @@ jobs:
     #############################################
 
     - name: Clone FFmpeg
+
       shell: msys2 {0}
+
       run: |
 
+
         cd /tmp
+
 
         git clone \
           --depth=1 \
           https://git.ffmpeg.org/ffmpeg.git
 
+
+
         cd ffmpeg
+
+
 
         git checkout $FF_VERSION
 
 
 
+
     - name: Configure FFmpeg
+
       shell: msys2 {0}
+
       run: |
 
+
         cd /tmp/ffmpeg
+
 
 
         ./configure \
@@ -216,11 +252,9 @@ jobs:
 
           --cc=x86_64-w64-mingw32-gcc \
 
-          --enable-gpl \
+          --enable-nonfree \
 
           --enable-version3 \
-
-          --enable-nonfree \
 
           --enable-static \
 
@@ -230,37 +264,46 @@ jobs:
 
           --disable-doc \
 
-          --enable-small \
+          --disable-programs=ffplay,ffprobe \
+
+          --enable-ffmpeg \
 
           --enable-libfdk_aac \
 
-          --enable-libx264 \
+          --enable-libmp3lame \
 
-          --enable-libx265 \
+          --enable-libopus
 
-          --enable-libopus \
-
-          --enable-libvpx
 
 
 
     - name: Compile FFmpeg
+
       shell: msys2 {0}
+
       run: |
 
+
         cd /tmp/ffmpeg
+
 
         make -j$(nproc)
 
 
 
+
     - name: Install FFmpeg
+
       shell: msys2 {0}
+
       run: |
+
 
         cd /tmp/ffmpeg
 
+
         make install
+
 
 
 
@@ -268,13 +311,17 @@ jobs:
     # Verify
     #############################################
 
-    - name: Check encoder
+    - name: Verify FDK AAC
+
       shell: msys2 {0}
+
       run: |
 
-        ffmpeg -version
 
-        ffmpeg -encoders | grep fdk
+        /mingw64/bin/ffmpeg -version
+
+
+        /mingw64/bin/ffmpeg -encoders | grep fdk
 
 
 
@@ -282,27 +329,43 @@ jobs:
     # Package
     #############################################
 
-    - name: Collect binary
+    - name: Package ffmpeg.exe
+
       shell: bash
+
       run: |
+
 
         mkdir release
 
+
+
         cp /mingw64/bin/ffmpeg.exe release/
 
+
+
         strip release/ffmpeg.exe
+
+
 
         ls -lh release/ffmpeg.exe
 
 
 
+
+
     - name: Upload Artifact
+
       uses: actions/upload-artifact@v4
+
       with:
 
-        name: ffmpeg-windows-full-fdk-aac
+
+        name: ffmpeg-windows-fdk-aac-audiobook
+
 
         path: release/ffmpeg.exe
+
 
 
 
@@ -310,9 +373,13 @@ jobs:
     # GitHub Release
     #############################################
 
-    - name: Release
+    - name: Create Release
+
       if: startsWith(github.ref, 'refs/tags/')
+
       uses: softprops/action-gh-release@v2
+
       with:
+
 
         files: release/ffmpeg.exe
