@@ -231,7 +231,6 @@ jobs:
           --disable-debug \
           --disable-doc \
           --disable-ffplay \
-          --enable-ffmpeg \
           --enable-ffprobe \
           --enable-libfdk_aac \
           --enable-libmp3lame \
@@ -268,6 +267,19 @@ jobs:
 
 
 
+    - name: Check install
+
+      shell: msys2 {0}
+
+      run: |
+
+        ls -lh /mingw64/bin/
+
+        test -f /mingw64/bin/ffmpeg.exe
+
+        test -f /mingw64/bin/ffprobe.exe
+
+
     #############################################
     # Verify
     #############################################
@@ -301,22 +313,19 @@ jobs:
 
     - name: Package
 
-      shell: bash
+      shell: msys2 {0}
 
       run: |
 
         mkdir release
 
+        cp /tmp/ffmpeg/ffmpeg.exe release/
 
-        cp /mingw64/bin/ffmpeg.exe release/
-
-        cp /mingw64/bin/ffprobe.exe release/
-
+        cp /tmp/ffmpeg/ffprobe.exe release/
 
         strip release/ffmpeg.exe
 
         strip release/ffprobe.exe
-
 
         ls -lh release
 
