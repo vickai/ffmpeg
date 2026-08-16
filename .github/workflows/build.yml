@@ -23,16 +23,24 @@ jobs:
         git clone https://github.com/mstorsjo/fdk-aac.git "${{ github.workspace }}\fdk-aac"
 
     - name: Build FDK-AAC
+      shell: pwsh
       run: |
-        cmake -S "${{ github.workspace }}\fdk-aac" -B "${{ github.workspace }}\fdk-aac\build" -G "Ninja" -DCMAKE_BUILD_TYPE=Release
+        cmake -S "${{ github.workspace }}\fdk-aac" `
+              -B "${{ github.workspace }}\fdk-aac\build" `
+              -G "Ninja" `
+              -DCMAKE_BUILD_TYPE=Release
+
         cmake --build "${{ github.workspace }}\fdk-aac\build"
         cmake --install "${{ github.workspace }}\fdk-aac\build" --prefix "${{ github.workspace }}\install"
+
+    - name: Clone FFmpeg
+      run: |
+        git clone https://github.com/FFmpeg/FFmpeg.git "${{ github.workspace }}\FFmpeg"
 
     - name: Configure FFmpeg
       shell: cmd
       run: |
         cd "${{ github.workspace }}\FFmpeg"
-        git clone https://github.com/FFmpeg/FFmpeg.git .
         configure ^
           --toolchain=msvc ^
           --enable-libfdk-aac ^
