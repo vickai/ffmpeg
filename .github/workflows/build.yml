@@ -1,77 +1,83 @@
-name: Build Static FFmpeg Windows (libfdk_aac Single EXE)
+name: Build FFmpeg Windows (libfdk_aac)
 on:
   workflow_dispatch:
   push:
     branches: [ main ]
 
 jobs:
-  build:
+  build-win64:
     runs-on: windows-latest
-    env:
-      PREFIX: ${{ github.workspace }}/build_out
-      W64DIR: ${{ github.workspace }}/w64devkit
     steps:
-      - name: Download w64devkit v2.9.1 (latest)
-        run: |
-          Invoke-WebRequest -Uri "https://github.com/skeeto/w64devkit/releases/download/v2.9.1/w64devkit-x64.exe" -OutFile w64devkit.exe
-          .\w64devkit.exe -o$env:W64DIR -y
-          echo "$env:W64DIR\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: mingw64
+          update: true
+          install: >-
+            base-devel git yasm nasm zip unzip
+            mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-pkg-config
+            mingw-w64-x86_64-lame mingw-w64-x86_64-x264 mingw-w64-x86_64-x265
+            mingw-w64-x86_64-libvpx mingw-w64-x86_64-opus
 
-      - name: Build static fdk-aac
-        shell: cmd
+      - name: Compile static fdk-aac
+        shell: msys2 {0}
         run: |
           git clone --depth=1 https://github.com/mstorsjo/fdk-aac.git
           cd fdk-aac
           mkdir build && cd build
-          cmake -G "Unix Makefiles" ^
-            -DCMAKE_BUILD_TYPE=Release ^
-            -DCMAKE_INSTALL_PREFIX=%PREFIX% ^
-            -DBUILD_SHARED_LIBS=OFF ^
-            -DCMAKE_POSITION_INDEPENDENT_CODE=ON ^
-            ..
-          make -j%NUMBER_OF_PROCESSORS%
+          cmake -G "MSYS Makefiles" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/mingw64 \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+          make -j$(nproc)
           make install
+          # 校验安装结果
+          pkg-config --modversion fdk-aac
 
-      - name: Build FFmpeg fully static
-        shell: cmd
+      - name: Compile FFmpeg
+        shell: msys2 {0}
         run: |
+          export PKG_CONFIG_PATH="/mingw64/lib/pkgconfig:$PKG_CONFIG_PATH"
           git clone --depth=1 https://github.com/FFmpeg/FFmpeg.git
           cd FFmpeg
-          set PKG_CONFIG_PATH=%PREFIX%/lib/pkgconfig
-          ./configure ^
-            --prefix=%PREFIX% ^
-            --target-os=mingw32 ^
-            --arch=x86_64 ^
-            --enable-gpl ^
-            --enable-nonfree ^
-            --enable-libfdk-aac ^
-            --enable-libmp3lame ^
-            --enable-libopus ^
-            --enable-libx264 ^
-            --enable-libx265 ^
-            --enable-libvpx ^
-            --enable-static ^
-            --disable-shared ^
-            --disable-debug ^
-            --disable-ffplay ^
-            --disable-doc ^
-            --extra-cflags="-I%PREFIX%/include" ^
-            --extra-ldflags="-L%PREFIX%/lib -static -static-libgcc -static-libstdc++" ^
+          ./configure \
+            --target-os=mingw64 \
+            --arch=x86_64 \
+            --enable-gpl \
+            --enable-nonfree \
+            --enable-libfdk-aac \
+            --enable-libmp3lame \
+            --enable-libopus \
+            --enable-libx264 \
+            --enable-libx265 \
+            --enable-libvpx \
+            --disable-shared \
+            --enable-static \
+            --disable-debug \
+            --disable-doc \
+            --disable-ffplay \
             --extra-libs="-lpthread"
-          make -j%NUMBER_OF_PROCESSORS%
+          make -j$(nproc)
           make install
+          # 检查是否开启fdk_aac
+          grep CONFIG_LIBFDK_AAC config.h
 
-      - name: Package artifacts
-        shell: cmd
+      - name: Collect all binaries + required DLLs
+        shell: msys2 {0}
         run: |
-          mkdir artifact
-          copy %PREFIX%\bin\ffmpeg.exe artifact\
-          copy %PREFIX%\bin\ffprobe.exe artifact\
-          cd artifact
-          powershell Compress-Archive -Path *.exe -DestinationPath ffmpeg-win64-static.zip
+          mkdir -p output
+          cp /mingw64/bin/ffmpeg.exe output/
+          cp /mingw64/bin/ffprobe.exe output/
+          # 必须复制运行依赖DLL！解决双击无输出
+          cp /mingw64/bin/libwinpthread-1.dll output/
+          cp /mingw64/bin/libgcc_s_seh-1.dll output/
+          cp /mingw64/bin/libstdc++-6.dll output/
+          cd output
+          zip -r ffmpeg-win64-full.zip *
 
-      - name: Upload artifact
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-win64-static
-          path: artifact/ffmpeg-win64-static.zip
+          name: ffmpeg-win64-with-fdkaac
+          path: output/ffmpeg-win64-full.zip
