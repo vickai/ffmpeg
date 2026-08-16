@@ -1,84 +1,77 @@
-name: Build FFmpeg Windows (libfdk_aac)
-
+name: Build Static FFmpeg Windows (libfdk_aac, Single EXE)
 on:
   workflow_dispatch:
   push:
     branches: [ main ]
 
 jobs:
-  build-windows-mingw64:
+  build:
     runs-on: windows-latest
+    env:
+      PREFIX: ${{ github.workspace }}/build_out
+      W64DEVKIT: ${{ github.workspace }}/w64devkit/bin
     steps:
-      - name: Setup MSYS2
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: mingw64
-          update: true
-          install: >-
-            base-devel
-            git
-            yasm
-            nasm
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-cmake
-            mingw-w64-x86_64-pkg-config
-            mingw-w64-x86_64-make
-            mingw-w64-x86_64-lame
-            mingw-w64-x86_64-x264
-            mingw-w64-x86_64-x265
-            mingw-w64-x86_64-libvpx
-            mingw-w64-x86_64-opus
-            zip unzip
+      - name: Fetch w64devkit (standalone MinGW toolchain)
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/skeeto/w64devkit/releases/download/v1.23.0/w64devkit-x64-1.23.0.zip" -OutFile w64devkit.zip
+          Expand-Archive w64devkit.zip -DestinationPath w64devkit
+          echo "${{ env.W64DEVKIT }}" | Out-File -FilePath $env:GITHUB_PATH -Append
 
       - name: Build static fdk-aac
-        shell: msys2 {0}
+        shell: cmd
         run: |
-          git clone https://github.com/mstorsjo/fdk-aac.git
+          git clone --depth=1 https://github.com/mstorsjo/fdk-aac.git
           cd fdk-aac
           mkdir build && cd build
-          cmake -G "MSYS Makefiles" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX=/mingw64 \
-            -DBUILD_SHARED_LIBS=OFF \
+          cmake -G "Unix Makefiles" ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DCMAKE_INSTALL_PREFIX=%PREFIX% ^
+            -DBUILD_SHARED_LIBS=OFF ^
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON ^
             ..
-          make -j$(nproc)
+          make -j%NUMBER_OF_PROCESSORS%
           make install
 
-      - name: Build FFmpeg
-        shell: msys2 {0}
+      - name: Build FFmpeg (fully static)
+        shell: cmd
         run: |
-          git clone https://github.com/FFmpeg/FFmpeg.git
+          git clone --depth=1 https://github.com/FFmpeg/FFmpeg.git
           cd FFmpeg
-          ./configure \
-            --prefix=/mingw64 \
-            --target-os=mingw64 \
-            --arch=x86_64 \
-            --enable-gpl \
-            --enable-nonfree \
-            --enable-libfdk-aac \
-            --enable-libmp3lame \
-            --enable-libopus \
-            --enable-libx264 \
-            --enable-libx265 \
-            --enable-libvpx \
-            --enable-static \
-            --disable-shared \
-            --extra-libs="-lpthread -lm" \
-            --disable-debug
-          make -j$(nproc)
+          set PKG_CONFIG_PATH=%PREFIX%/lib/pkgconfig
+          ./configure ^
+            --prefix=%PREFIX% ^
+            --target-os=mingw32 ^
+            --arch=x86_64 ^
+            --enable-gpl ^
+            --enable-nonfree ^
+            --enable-libfdk-aac ^
+            --enable-libmp3lame ^
+            --enable-libopus ^
+            --enable-libx264 ^
+            --enable-libx265 ^
+            --enable-libvpx ^
+            --enable-static ^
+            --disable-shared ^
+            --disable-debug ^
+            --disable-ffplay ^
+            --disable-doc ^
+            --extra-cflags="-I%PREFIX%/include" ^
+            --extra-ldflags="-L%PREFIX%/lib -static -static-libgcc -static-libstdc++" ^
+            --extra-libs="-lpthread"
+          make -j%NUMBER_OF_PROCESSORS%
           make install
 
-      - name: Collect binaries & Zip
-        shell: msys2 {0}
+      - name: Package single EXEs
+        shell: cmd
         run: |
-          mkdir -p output
-          cp /mingw64/bin/ffmpeg.exe output/
-          cp /mingw64/bin/ffprobe.exe output/
-          cd output
-          zip -r ffmpeg-windows-x86_64.zip ffmpeg.exe ffprobe.exe
+          mkdir artifact
+          copy %PREFIX%\bin\ffmpeg.exe artifact\
+          copy %PREFIX%\bin\ffprobe.exe artifact\
+          cd artifact
+          zip ffmpeg-win64-static.zip ffmpeg.exe ffprobe.exe
 
-      - name: Upload Artifact
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-windows-x86_64
-          path: output/ffmpeg-windows-x86_64.zip
+          name: ffmpeg-win64-static
+          path: artifact/ffmpeg-win64-static.zip
