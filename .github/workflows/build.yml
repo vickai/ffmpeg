@@ -63,9 +63,7 @@ jobs:
             --enable-libvpx \
             --enable-static \
             --disable-shared \
-            --pkg-config-flags="--static" \
             --extra-libs="-lpthread -lm" \
-            --extra-ldflags="-static-libgcc -static-libstdc++" \
             --disable-debug
           make -j$(nproc)
           make install
