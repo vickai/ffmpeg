@@ -1,0 +1,364 @@
+# ============================================================================
+# 文件：release.yml
+# 用途：FFmpeg FDK-AAC 有声书版的构建与发布工作流
+#
+# 功能概述：
+#   1. 在 Windows x86_64 环境下静态编译 FFmpeg（集成 libfdk-aac、
+#      libmp3lame、libopus、libsoxr 四个音频库）
+#   2. 对产物做音频能力体检（编码器 / 滤镜 / 复用器 / 重采样后端）
+#   3. 将 ffmpeg.exe、ffprobe.exe 打包为 zip，上传 Artifact，
+#      并在打标签时发布到 GitHub Releases
+#   4. 发行版说明直接引用仓库根目录的 README.md，一处维护、多处展示
+#
+# 触发方式：
+#   - push 标签（v*，例如 v1.0.0）：构建 -> 打包 -> 创建 Release
+#   - workflow_dispatch（手动触发）：仅构建并上传 Artifact，不创建 Release
+#
+# 环境与构建策略：
+#   - runner    ：windows-2022
+#   - 工具链     ：MSYS2 / MINGW64（x86_64 交叉编译到 mingw32）
+#   - 构建方式   ：全静态链接（--enable-static --disable-shared），单文件分发
+#   - 许可       ：--enable-version3 --enable-nonfree
+#                 （libfdk-aac 为 Fraunhofer 非自由许可，分发前请确认授权）
+#
+# 产物命名：
+#   ffmpeg-fdk-aac-build_<tag>.zip —— <tag> 取自创建 Release 的标签名，
+#   例如打 v1.0.0 标签得到 ffmpeg-fdk-aac-build_v1.0.0.zip
+# ============================================================================
+
+name: Release
+
+# ----------------------------------------------------------------------------
+# 触发条件
+# ----------------------------------------------------------------------------
+on:
+  workflow_dispatch:        # 手动触发：适合日常试跑，不创建 Release
+  push:
+    tags:
+      - "v*"                # 推送 v 开头的标签（如 v1.0.0）触发正式发布
+
+# ----------------------------------------------------------------------------
+# 权限声明
+# ----------------------------------------------------------------------------
+# GitHub Actions 默认 GITHUB_TOKEN 仅有 contents: read 权限，而创建
+# GitHub Release（softprops/action-gh-release）需要写权限，因此必须在此
+# 显式声明 contents: write，否则会报 403 Resource not accessible by
+# integration。
+permissions:
+  contents: write          # 允许创建 Release 并上传发布资产（zip）
+
+env:
+  FF_VERSION: n9.0          # 待编译的 FFmpeg 版本（release 分支名）
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    steps:
+      # ----------------------------------------------------------------------
+      # 0. 拉取仓库代码
+      # ----------------------------------------------------------------------
+      - name: Checkout
+        uses: actions/checkout@v4
+
+
+      # ----------------------------------------------------------------------
+      # 1. 安装 MSYS2 工具链
+      #    安装编译依赖：git/make/汇编器(yasm,nasm)/构建工具(autoconf,
+      #    automake,libtool)/GCC 工具链；zip 用于产物打包。
+      #    注意：GitHub Actions 的 with 输入值必须是字符串，不能是列表，
+      #    因此 install 使用 >- 折叠块（string）；折叠块内不得写 "# 注释"，
+      #    否则注释文字会被当作包名传给 pacman 导致安装失败。
+      # ----------------------------------------------------------------------
+      - name: Install MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git
+            make
+            yasm
+            nasm
+            pkg-config
+            autoconf
+            automake
+            libtool
+            gcc
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-libsoxr
+            zip
+
+
+      # ----------------------------------------------------------------------
+      # 2. 环境准备
+      #    把 MINGW64 的 bin 目录加入 PATH；关闭 CRLF 自动转换，避免
+      #    源码/配置脚本被换行符破坏；显式使用 HTTP/1.1 提升拉取稳定性
+      # ----------------------------------------------------------------------
+      - name: Setup PATH
+        shell: bash
+        run: |
+          echo "/mingw64/bin" >> $GITHUB_PATH
+          git config --global core.autocrlf false
+          git config --global http.version HTTP/1.1
+
+
+      # ----------------------------------------------------------------------
+      # 3. 编译依赖库
+      #    以下四个库均以静态库形式安装到 /mingw64，供 FFmpeg 静态链接
+      # ----------------------------------------------------------------------
+
+      # ----------------------------------------------------------------------
+      # 3.1 libfdk-aac：高质量 AAC 编码库（本构建的核心卖点）
+      #     非自由许可，因此 FFmpeg 侧必须开启 --enable-nonfree
+      # ----------------------------------------------------------------------
+      - name: Build libfdk-aac
+        shell: msys2 {0}
+        run: |
+          cd /tmp
+          git clone --depth=1 https://github.com/mstorsjo/fdk-aac.git
+          cd fdk-aac
+          autoreconf -fiv
+          ./configure \
+            --prefix=/mingw64 \
+            --enable-static \
+            --disable-shared
+          make -j$(nproc)
+          make install
+
+      # ----------------------------------------------------------------------
+      # 3.2 libmp3lame：MP3 编码库
+      #     --disable-frontend 跳过命令行工具，仅编译库本体
+      # ----------------------------------------------------------------------
+      - name: Build libmp3lame
+        shell: msys2 {0}
+        run: |
+          cd /tmp
+          git clone --depth=1 https://github.com/lameproject/lame.git
+          cd lame
+          ./configure \
+            --prefix=/mingw64 \
+            --enable-static \
+            --disable-shared \
+            --disable-frontend
+          make -j$(nproc)
+          make install
+
+      # ----------------------------------------------------------------------
+      # 3.3 libopus：Opus 编码库
+      #     --disable-extra-programs 仅编译库本体，不生成演示程序
+      # ----------------------------------------------------------------------
+      - name: Build libopus
+        shell: msys2 {0}
+        run: |
+          cd /tmp
+          git clone --depth=1 https://github.com/xiph/opus.git
+          cd opus
+          autoreconf -fiv
+          ./configure \
+            --prefix=/mingw64 \
+            --enable-static \
+            --disable-shared \
+            --disable-extra-programs
+          make -j$(nproc)
+          make install
+
+      # ----------------------------------------------------------------------
+      # 3.4 libsoxr：高质量音频重采样库
+      #    直接使用 MSYS2 官方包 mingw-w64-x86_64-libsoxr（0.1.3-5）：
+      #     - soxr 上游 CMake 在 Windows 上不生成 soxr.pc（elseif NOT WIN32），
+      #       官方包已打补丁修复，自带正确 soxr.pc，FFmpeg configure 可正常检测
+      #     - 官方包同时提供静态库 libsoxr.a 与动态库，满足本构建的静态链接
+      #     - x86_64 构建带 OpenMP 加速，静态链接需在 extra-libs 补充 -lgomp
+      #     - 依赖（mingw-w64-x86_64-omp）由 pacman 自动安装
+      #    本小节无需单独构建步骤（包已由 Install MSYS2 步骤中的 pacman
+      #    自动安装），仅做存在性校验，提前暴露安装问题，避免拖到
+      #    Configure 阶段才报 libsoxr not found
+      # ----------------------------------------------------------------------
+      - name: Verify libsoxr package
+        shell: msys2 {0}
+        run: |
+          test -f /mingw64/lib/libsoxr.a
+          test -f /mingw64/lib/pkgconfig/soxr.pc
+          pkg-config --exists soxr && echo "soxr OK: $(pkg-config --modversion soxr)"
+
+      # ----------------------------------------------------------------------
+      # 4. 拉取 FFmpeg 源码
+      #    浅克隆 n9.0 分支后切到 FF_VERSION 指定的版本
+      # ----------------------------------------------------------------------
+      - name: Clone FFmpeg
+        shell: msys2 {0}
+        run: |
+          cd /tmp
+          git clone \
+            --depth=1 \
+            --branch n9.0 \
+            https://github.com/FFmpeg/FFmpeg.git ffmpeg
+          cd ffmpeg
+          git checkout $FF_VERSION
+
+      # ----------------------------------------------------------------------
+      # 5. 依赖库 pkg-config 检测诊断
+      #    显式把 /mingw64/lib/pkgconfig 加入 PKG_CONFIG_PATH（MSYS2 的
+      #    pkg-config 默认搜索路径可能不含该目录，导致 FFmpeg 找不到库）；
+      #    并打印各库的检测结果，便于失败时直接定位原因
+      # ----------------------------------------------------------------------
+      - name: Verify pkg-config
+        shell: msys2 {0}
+        run: |
+          export PKG_CONFIG_PATH=/mingw64/lib/pkgconfig:$PKG_CONFIG_PATH
+          echo "== pkg-config search path =="
+          pkg-config --variable pc_path pkg-config || true
+          echo "== /mingw64/lib/pkgconfig contents =="
+          ls -la /mingw64/lib/pkgconfig/ || true
+          echo "== soxr.pc =="
+          cat /mingw64/lib/pkgconfig/soxr.pc 2>&1 || true
+          echo "== library existence checks =="
+          for p in fdk-aac lame opus soxr; do
+            if pkg-config --exists "$p"; then
+              echo "$p: OK ($(pkg-config --modversion "$p"))"
+            else
+              echo "$p: MISSING"
+            fi
+          done
+
+      # ----------------------------------------------------------------------
+      # 6. 配置 FFmpeg
+      #    关键配置说明：
+      #     - 静态编译：--enable-static --disable-shared + 静态链接相关参数
+      #     - 平台目标：--target-os=mingw32 交叉编译 x86_64
+      #     - 许可开关：--enable-nonfree（fdk-aac）/ --enable-version3（opus 等）
+      #     - 功能裁剪：--disable-debug / --disable-doc / --disable-ffplay
+      #                 （纯音频工具，不需要播放器与文档）
+      #     - 保留 ffprobe：响度测量、信息探测依赖它
+      #     - 音频库：--enable-libfdk_aac / --enable-libmp3lame /
+      #               --enable-libopus / --enable-libsoxr
+      # ----------------------------------------------------------------------
+      - name: Configure FFmpeg
+        shell: msys2 {0}
+        run: |
+          export PKG_CONFIG_PATH=/mingw64/lib/pkgconfig:$PKG_CONFIG_PATH
+          cd /tmp/ffmpeg
+          ./configure \
+            --prefix=/mingw64 \
+            --pkg-config-flags="--static" \
+            --extra-cflags="-static" \
+            --extra-ldflags="-static" \
+            --extra-libs="-lgomp -lpthread -lws2_32 -lwinmm" \
+            --arch=x86_64 \
+            --target-os=mingw32 \
+            --enable-cross-compile \
+            --cc=x86_64-w64-mingw32-gcc \
+            --enable-nonfree \
+            --enable-version3 \
+            --enable-static \
+            --disable-shared \
+            --disable-debug \
+            --disable-doc \
+            --disable-ffplay \
+            --enable-ffprobe \
+            --enable-libfdk_aac \
+            --enable-libmp3lame \
+            --enable-libopus \
+            --enable-libsoxr
+
+      # ----------------------------------------------------------------------
+      # 7. 编译与安装
+      # ----------------------------------------------------------------------
+      - name: Compile FFmpeg
+        shell: msys2 {0}
+        run: |
+          cd /tmp/ffmpeg
+          make -j$(nproc)
+
+      - name: Install FFmpeg
+        shell: msys2 {0}
+        run: |
+          cd /tmp/ffmpeg
+          make install
+
+      # ----------------------------------------------------------------------
+      # 8. 安装结果检查
+      #    确认 ffmpeg.exe 与 ffprobe.exe 均已生成
+      # ----------------------------------------------------------------------
+      - name: Check install
+        shell: msys2 {0}
+        run: |
+          ls -lh /mingw64/bin/
+          test -f /mingw64/bin/ffmpeg.exe
+          test -f /mingw64/bin/ffprobe.exe
+
+      # ----------------------------------------------------------------------
+      # 9. 音频能力体检（Verify）
+      #    对构建结果做四组检查，防止后续升级/改配置时功能漂移：
+      #     - 版本信息：ffmpeg -version
+      #     - 重采样后端：configuration 行是否含 --enable-libsoxr
+      #     - 编码器：fdk / mp3 / opus / flac / alac / wavpack / aac / vorbis
+      #     - 滤镜：loudnorm / ebur128 / dynaudnorm / 静音检测处理 / afade / aresample
+      #     - 复用器：mp4 / ipod（m4b 章节）/ ogg / matroska / wav / flac
+      #    任一 grep 无输出即视为失败，阻止发布
+      # ----------------------------------------------------------------------
+      - name: Verify
+        shell: msys2 {0}
+        run: |
+          echo "===== FFmpeg version ====="
+          /mingw64/bin/ffmpeg -version
+          echo "===== libsoxr (configuration) ====="
+          /mingw64/bin/ffmpeg -version | grep -i soxr
+          echo "===== Encoders ====="
+          /mingw64/bin/ffmpeg -encoders | grep -E "fdk|mp3|opus|flac|alac|wavpack|aac|vorbis"
+          echo "===== Filters ====="
+          /mingw64/bin/ffmpeg -filters | grep -E "loudnorm|ebur128|dynaudnorm|silencedetect|silenceremove|afade|aresample"
+          echo "===== Muxers ====="
+          /mingw64/bin/ffmpeg -muxers | grep -E "mp4|ipod|ogg|matroska|wav|flac"
+
+      # ----------------------------------------------------------------------
+      # 10. 打包
+      #     将两个可执行文件 strip 后打入 zip：
+      #      - 标签触发（正式发布）：zip 名 = ffmpeg-fdk-aac-build_<tag>.zip
+      #      - 手动触发（试跑）    ：zip 名 = ffmpeg-fdk-aac-build_dev.zip
+      #     产物统一输出到 $GITHUB_WORKSPACE/release_artifacts/，
+      #     便于后续 Artifact 上传与 Release 发布步骤引用
+      # ----------------------------------------------------------------------
+      - name: Package
+        shell: msys2 {0}
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/release_artifacts"
+          cp /tmp/ffmpeg/ffmpeg.exe /tmp/ffmpeg/ffprobe.exe "$GITHUB_WORKSPACE/release_artifacts/"
+          strip "$GITHUB_WORKSPACE/release_artifacts/ffmpeg.exe" "$GITHUB_WORKSPACE/release_artifacts/ffprobe.exe"
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            ZIP_TAG="$GITHUB_REF_NAME"                   # 标签名，如 v1.0.0
+          else
+            ZIP_TAG="dev"                                # 手动触发时的兜底命名
+          fi
+          echo "ZIP_TAG=${ZIP_TAG}" >> "${GITHUB_ENV}"   # 供后续 Artifact 步骤引用
+          cd "$GITHUB_WORKSPACE/release_artifacts"
+          zip "ffmpeg-fdk-aac-build_${ZIP_TAG}.zip" ffmpeg.exe ffprobe.exe
+          ls -lh
+
+      # ----------------------------------------------------------------------
+      # 11. 上传 Artifact（两种触发方式都执行）
+      #     仅上传 Package 步骤生成的单个 zip（文件名随 ZIP_TAG 变化），
+      #     避免下载的 Artifact 里混入散装 exe，消除重复内容
+      # ----------------------------------------------------------------------
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-fdk-aac-build
+          path: release_artifacts/ffmpeg-fdk-aac-build_${{ env.ZIP_TAG }}.zip
+
+      # ----------------------------------------------------------------------
+      # 12. 发布 GitHub Release（仅标签触发）
+      #     - name      ：Release 标题 = 标签名（如 v1.0.0）
+      #     - body_path ：发行版说明直接引用仓库根目录的 README.md，
+      #                   与仓库文档保持单一来源，无需在 workflow 内重复维护
+      #     - files     ：上传对应标签的 zip 压缩包
+      # ----------------------------------------------------------------------
+      - name: GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body_path: README.md
+          files: release_artifacts/ffmpeg-fdk-aac-build_${{ github.ref_name }}.zip
